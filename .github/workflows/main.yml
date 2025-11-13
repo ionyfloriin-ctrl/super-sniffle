@@ -1,0 +1,111 @@
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+name: CI
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PY_COLORS: "1"
+      LANG: en_US.UTF-8
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.13"]
+        max-parallel: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      - name: Install system packages (locale, xvfb, curl, lsb-release, gnupg)
+        run: |
+          echo "::group::System packages"
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata locales xvfb unzip curl gnupg lsb-release
+          sudo locale-gen en_US.UTF-8
+          sudo update-locale LANG="en_US.UTF-8"
+          locale
+          echo "::endgroup::"
+
+      - name: Install Google Chrome
+        run: |
+          echo "::group::Installing Google Chrome"
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-linux-signing-key.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-key.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update -y
+          sudo apt-get install -y google-chrome-stable
+          google-chrome --version || true
+          echo "::endgroup::"
+
+      - name: Install Python dependencies
+        run: |
+          echo "::group::Python packages"
+          python -m pip install --upgrade pip wheel
+          pip install --upgrade seleniumbase pyautogui pymongo python-xlib
+          echo "::endgroup::"
+
+      - name: Check the console scripts interface
+        run: |
+          echo "::group::Console scripts"
+          # show where scripts are installed; don't fail if not found
+          command -v seleniumbase || echo "seleniumbase not found in PATH"
+          command -v sbase || echo "sbase not found in PATH"
+          echo "::endgroup::"
+
+      - name: Install chromedriver (seleniumbase)
+        run: |
+          echo "::group::seleniumbase chromedriver install"
+          seleniumbase install chromedriver
+          echo "::endgroup::"
+
+      - name: Optional: Install Cloudflare WARP (only if enabled via secret)
+        if: ${{ secrets.CLOUDFLARE_WARP_ENABLE == 'true' }}
+        env:
+          WARP_TOKEN: ${{ secrets.CLOUDFLARE_WARP_TOKEN }}
+        run: |
+          echo "::group::Cloudflare WARP setup (optional)"
+          # Add Cloudflare's repository and import its GPG key
+          curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update -y
+          sudo apt-get install -y cloudflare-warp
+          # Register (either using token or interactive "new" registration)
+          if [ -n "$WARP_TOKEN" ]; then
+            sudo warp-cli --accept-tos register --token "$WARP_TOKEN" || true
+          else
+            sudo warp-cli --accept-tos registration new || true
+          fi
+          sudo warp-cli --accept-tos connect || true
+          sleep 5
+          sudo warp-cli --accept-tos status || true
+          echo "::endgroup::"
+
+      - name: Run python ion.py --debug
+        run: |
+          echo "::group::Running ion.py"
+          # Use xvfb-run to ensure headless display for GUI/selenium
+          xvfb-run -a python ion.py --debug --chrome --screenshot || true
+          echo "::endgroup::"
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: seleniumbase-screenshots
+          path: |
+            ./latest_logs/
+          retention-days: 7
