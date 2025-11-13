@@ -73,27 +73,24 @@ jobs:
           seleniumbase install chromedriver
           echo "::endgroup::"
 
-      - name: Optional: Install Cloudflare WARP (only if enabled via secret)
-        if: ${{ secrets.CLOUDFLARE_WARP_ENABLE == 'true' }}
-        env:
-          WARP_TOKEN: ${{ secrets.CLOUDFLARE_WARP_TOKEN }}
+      - name: Install Cloudflare WARP
         run: |
-          echo "::group::Cloudflare WARP setup (optional)"
           # Add Cloudflare's repository and import its GPG key
+          sudo apt update
+          sudo apt install -y curl
           curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update -y
-          sudo apt-get install -y cloudflare-warp
-          # Register (either using token or interactive "new" registration)
-          if [ -n "$WARP_TOKEN" ]; then
-            sudo warp-cli --accept-tos register --token "$WARP_TOKEN" || true
-          else
-            sudo warp-cli --accept-tos registration new || true
-          fi
-          sudo warp-cli --accept-tos connect || true
+  
+          # Install the WARP client
+          sudo apt update
+          sudo apt install -y cloudflare-warp
+  
+          # Register WARP (replace with your WARP credentials if needed)
+  
+          sudo warp-cli --accept-tos registration new
+          sudo warp-cli --accept-tos connect
           sleep 5
-          sudo warp-cli --accept-tos status || true
-          echo "::endgroup::"
+          sudo warp-cli --accept-tos status
 
       - name: Run python ion.py --debug
         run: |
